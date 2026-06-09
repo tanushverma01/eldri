@@ -1,0 +1,43 @@
+use tauri::{GlobalShortcutManager, Manager};
+use screenshots::Screen;
+use base64::{engine::general_purpose, Engine as _};
+
+// Tauri Command to be called from React
+#[tauri::command]
+async fn capture_screen() -> Result<String, String> {
+    let screens = Screen::all().map_err(|e| e.to_string())?;
+
+    // Grab the primary screen
+    if let Some(screen) = screens.first() {
+        let image = screen.capture().map_err(|e| e.to_string())?;
+        let buffer = image.to_png().map_err(|e| e.to_string())?;
+
+        // Encode to base64 so we can easily pass it to the frontend or OpenAI API
+        let b64 = general_purpose::STANDARD.encode(&buffer);
+        Ok(format!("data:image/png;base64,{}", b64))
+    } else {
+        Err("No screens found".into())
+    }
+}
+
+fn main() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![capture_screen])
+        .setup(|app| {
+            let app_handle = app.handle();
+            let mut shortcut_manager = app_handle.global_shortcut_manager();
+
+            // When Ctrl+Shift+S is pressed, show the widget window
+            let widget_window = app_handle.get_window("widget").unwrap();
+            shortcut_manager.register("Ctrl+Shift+S", move || {
+                println!("Shortcut triggered!");
+                widget_window.show().unwrap();
+                widget_window.set_focus().unwrap();
+                // From here, you can trigger an event to React to call capture_screen()
+            }).unwrap();
+
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
