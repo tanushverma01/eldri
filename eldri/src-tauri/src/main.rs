@@ -1,12 +1,8 @@
 // Prevents additional console window on Windows in release, do not remove!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::codecs::png::PngEncoder;
-use image::{ExtendedColorType, ImageEncoder};
-use screenshots::Screen;
 use serde::Deserialize;
-use tauri::Manager;
+use tauri::{Manager, Window};
 
 #[derive(Deserialize)]
 struct AiRequest {
@@ -18,22 +14,8 @@ struct AiRequest {
 }
 
 #[tauri::command]
-async fn capture_screen() -> Result<String, String> {
-    let screens = Screen::all().map_err(|e| e.to_string())?;
-    let screen = screens.first().ok_or("No active screen display detected.")?;
-    let image = screen.capture().map_err(|e| e.to_string())?;
-
-    let mut png_bytes = Vec::new();
-    PngEncoder::new(&mut png_bytes)
-        .write_image(
-            &image.into_raw(),
-            screen.display_info.width,
-            screen.display_info.height,
-            ExtendedColorType::Rgba8,
-        )
-        .map_err(|e| e.to_string())?;
-
-    Ok(STANDARD.encode(&png_bytes))
+async fn capture_screen(window: Window) -> Result<String, String> {
+    eldri_lib::capture::capture_screen(window).await
 }
 
 #[tauri::command]
@@ -41,8 +23,14 @@ async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
     let client = reqwest::Client::new();
     let image_b64 = req
         .image_base64
-        .strip_prefix("data:image/png;base64,")
+        .strip_prefix("data:image/jpeg;base64,")
+        .or_else(|| req.image_base64.strip_prefix("data:image/png;base64,"))
         .unwrap_or(&req.image_base64);
+    let image_mime = if req.image_base64.contains("image/jpeg") {
+        "image/jpeg"
+    } else {
+        "image/png"
+    };
 
     match req.provider.as_str() {
         "openai" | "groq" => {
@@ -61,7 +49,7 @@ async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
                         "role": "user",
                         "content": [
                             { "type": "text", "text": req.prompt },
-                            { "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{}", image_b64) } }
+                            { "type": "image_url", "image_url": { "url": format!("data:{};base64,{}", image_mime, image_b64) } }
                         ]
                     }]
                 }))
@@ -86,7 +74,7 @@ async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
                     "messages": [{
                         "role": "user",
                         "content": [
-                            { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": image_b64 }},
+                            { "type": "image", "source": { "type": "base64", "media_type": image_mime, "data": image_b64 }},
                             { "type": "text", "text": req.prompt }
                         ]
                     }]
