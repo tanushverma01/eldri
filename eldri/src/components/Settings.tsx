@@ -1,6 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Key, Database, Cpu, Save, CheckCircle, Sun, Moon } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { AppStorage, AppSettings } from '../utils/storage';
+
+const MASKED_KEY = '••••••••••••••••••••••••••••••••';
+
+const PROVIDER_MODELS: Record<AppSettings['provider'], string[]> = {
+  openai: ['gpt-4o', 'gpt-4o-mini'],
+  openrouter: ['google/gemini-2.5-pro', 'anthropic/claude-3.5-sonnet'],
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  groq: ['llama-3.2-11b-vision-preview'],
+  gemini: ['gemini-2.5-flash', 'gemini-2.5-pro']
+};
 
 interface SettingsProps {
   theme: AppSettings['theme'];
@@ -9,12 +20,25 @@ interface SettingsProps {
 
 export default function Settings({ theme, onThemeChange }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>(AppStorage.getSettings());
+  const [localKey, setLocalKey] = useState('');
   const [saved, setSaved] = useState(false);
   const isLight = theme === 'light';
 
   useEffect(() => {
     setSettings(AppStorage.getSettings());
   }, [theme]);
+
+  useEffect(() => {
+    const syncSecureKey = async () => {
+      try {
+        const structuralKey = await invoke<string>('get_secure_key', { provider: settings.provider });
+        setLocalKey(structuralKey ? MASKED_KEY : '');
+      } catch (err) {
+        console.error('OS Key extraction error:', err);
+      }
+    };
+    syncSecureKey();
+  }, [settings.provider]);
 
   const handleThemeChange = (nextTheme: AppSettings['theme']) => {
     const updated = { ...AppStorage.getSettings(), theme: nextTheme };
@@ -23,24 +47,25 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
     onThemeChange(nextTheme);
   };
 
-  const handleProviderChange = (selectedProvider: AppSettings['provider']) => {
-    let defaultModel = 'gpt-4o';
-    if (selectedProvider === 'openrouter') defaultModel = 'google/gemini-2.5-pro';
-    if (selectedProvider === 'deepseek') defaultModel = 'deepseek-chat';
-    if (selectedProvider === 'groq') defaultModel = 'llama-3.2-11b-vision-preview';
-    if (selectedProvider === 'gemini') defaultModel = 'gemini-2.5-flash';
+  const handleSave = async () => {
+    try {
+      AppStorage.saveSettings(settings);
+      localStorage.setItem('eldri_provider', settings.provider);
+      localStorage.setItem('eldri_model', settings.model);
 
-    setSettings({
-      ...settings,
-      provider: selectedProvider,
-      model: defaultModel,
-    });
-  };
+      if (localKey && localKey !== MASKED_KEY) {
+        await invoke('save_secure_key', {
+          provider: settings.provider,
+          key: localKey,
+        });
+      }
 
-  const handleSave = () => {
-    AppStorage.saveSettings(settings);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+      console.log('Profile secured and updated successfully.');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (error) {
+      console.error('Failed to secure credentials:', error);
+    }
   };
 
   const inputClass = isLight
@@ -51,10 +76,10 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
     <div className="p-6 max-w-2xl font-sans transition-colors duration-200">
       <div className="mb-6">
         <h1 className={`text-2xl font-bold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
-          Configuration Profile
+          Encrypted Profile Core
         </h1>
         <p className={`text-xs mt-1 ${isLight ? 'text-gray-500' : 'text-zinc-400'}`}>
-          Manage connection keys, aesthetic layout styles, and language engines.
+          Keys are locked straight into native host OS hardware sandboxes.
         </p>
       </div>
 
@@ -62,7 +87,6 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
         isLight ? 'bg-white border-gray-200' : 'bg-[#121214] border-[#222226]'
       }`}>
 
-        {/* AESTHETIC LAYOUT MODE */}
         <div className="flex flex-col gap-2">
           <label className={`text-[11px] font-bold uppercase tracking-wider ${
             isLight ? 'text-gray-500' : 'text-zinc-400'
@@ -99,27 +123,29 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
           </div>
         </div>
 
-        {/* AI ECOSYSTEM PROVIDER */}
         <div className="flex flex-col gap-1.5">
           <label className={`text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${
             isLight ? 'text-gray-500' : 'text-zinc-400'
           }`}>
-            <Database size={12} className="text-purple-400" /> AI Ecosystem Provider
+            <Database size={12} className="text-purple-400" /> Platform Router
           </label>
           <select
             value={settings.provider}
-            onChange={(e) => handleProviderChange(e.target.value as AppSettings['provider'])}
+            onChange={(e) => setSettings({
+              ...settings,
+              provider: e.target.value as AppSettings['provider'],
+              model: PROVIDER_MODELS[e.target.value as AppSettings['provider']][0]
+            })}
             className={`border text-sm rounded-xl p-2.5 outline-none focus:border-purple-500 transition-colors cursor-pointer ${inputClass}`}
           >
-            <option value="openai">OpenAI Official</option>
-            <option value="openrouter">OpenRouter Router Gateway</option>
-            <option value="deepseek">DeepSeek Official Backend</option>
-            <option value="groq">Groq Cloud Engine (Ultra Fast)</option>
-            <option value="gemini">Google Gemini API Gateway</option>
+            <option value="openai">OpenAI</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="groq">Groq Engine</option>
+            <option value="gemini">Google Gemini</option>
           </select>
         </div>
 
-        {/* API KEY */}
         <div className="flex flex-col gap-1.5">
           <label className={`text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${
             isLight ? 'text-gray-500' : 'text-zinc-400'
@@ -128,26 +154,28 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
           </label>
           <input
             type="password"
-            value={settings.apiKey}
-            placeholder="Enter token key for selected router..."
-            onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
+            value={localKey}
+            placeholder={localKey ? 'Token archived in hardware vault' : 'Enter uninitialized target API token...'}
+            onChange={(e) => setLocalKey(e.target.value)}
             className={`border text-sm rounded-xl p-2.5 outline-none focus:border-purple-500 font-mono tracking-wider ${inputClass}`}
           />
         </div>
 
-        {/* MODEL */}
         <div className="flex flex-col gap-1.5">
           <label className={`text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${
             isLight ? 'text-gray-500' : 'text-zinc-400'
           }`}>
-            <Cpu size={12} className="text-purple-400" /> Vision Intelligence Core Model
+            <Cpu size={12} className="text-purple-400" /> Language Model Core
           </label>
-          <input
-            type="text"
+          <select
             value={settings.model}
             onChange={(e) => setSettings({ ...settings, model: e.target.value })}
             className={`border text-sm rounded-xl p-2.5 outline-none focus:border-purple-500 font-mono ${inputClass}`}
-          />
+          >
+            {PROVIDER_MODELS[settings.provider].map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
         </div>
 
         <div className="pt-2 flex items-center justify-between">
@@ -160,7 +188,7 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
 
           {saved && (
             <span className="text-emerald-400 text-xs flex items-center gap-1 animate-in fade-in duration-200">
-              <CheckCircle size={14} /> Router configuration updated.
+              <CheckCircle size={14} /> Vault Updated.
             </span>
           )}
         </div>

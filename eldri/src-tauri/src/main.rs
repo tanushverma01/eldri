@@ -19,6 +19,16 @@ async fn capture_screen(window: Window) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn save_secure_key(provider: String, key: String) -> Result<(), String> {
+    eldri_lib::save_secure_key(provider, key).await
+}
+
+#[tauri::command]
+async fn get_secure_key(provider: String) -> Result<String, String> {
+    eldri_lib::get_secure_key(provider).await
+}
+
+#[tauri::command]
 async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
     let client = reqwest::Client::new();
     let image_b64 = req
@@ -94,32 +104,50 @@ async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
 }
 
 fn main() {
-    tauri::Builder::default()
+  let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![capture_screen, analyze_with_eldri])
-        .setup(|app| {
-            #[cfg(desktop)]
-            {
-                use tauri_plugin_global_shortcut::{Builder, ShortcutState};
-                let handle = app.handle().clone();
-                app.handle()
-                    .plugin(
-                        Builder::new()
-                            .with_shortcuts(["Ctrl+Shift+E"])?
-                            .with_handler(move |_app, _shortcut, event| {
-                                if event.state == ShortcutState::Pressed {
-                                    if let Some(w) = handle.get_webview_window("widget") {
-                                        let _ = w.show();
-                                        let _ = w.set_focus();
-                                    }
-                                }
-                            })
-                            .build(),
-                    )
-                    .ok();
+        .invoke_handler(tauri::generate_handler![
+            capture_screen,
+            analyze_with_eldri,
+            save_secure_key,
+            get_secure_key
+        ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
             }
-            Ok(())
-        })
+        });
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder
+            .plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .build(),
+            )
+            .setup(|app| {
+                eldri_lib::setup_tray(app)?;
+
+                use tauri_plugin_global_shortcut::{ShortcutState, GlobalShortcutExt};
+                let handle = app.handle().clone();
+                let widget_handle = handle.clone();
+                handle.global_shortcut().on_shortcut("Ctrl+Shift+E", move |_app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        if let Some(w) = widget_handle.get_webview_window("widget") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                })?;
+
+                Ok(())
+            });
+    }
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

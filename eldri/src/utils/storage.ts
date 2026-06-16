@@ -8,8 +8,6 @@ export interface SessionLog {
 }
 
 export interface AppSettings {
-  apiKey: string;
-  // Expanded to include direct native API routers
   provider: 'openai' | 'openrouter' | 'deepseek' | 'groq' | 'gemini';
   model: string;
   theme: 'dark' | 'light';
@@ -23,7 +21,6 @@ const DEFAULT_PROMPTS: { [key: string]: string } = {
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
-  apiKey: '',
   provider: 'openai',
   model: 'gpt-4o',
   theme: 'dark',
@@ -44,7 +41,21 @@ export const AppStorage = {
 
   saveSettings(settings: AppSettings) {
     localStorage.setItem('eldri_settings', JSON.stringify(settings));
+    localStorage.setItem('eldri_provider', settings.provider);
+    localStorage.setItem('eldri_model', settings.model);
     window.dispatchEvent(new Event('storage'));
+  },
+
+  getActiveProvider(): AppSettings['provider'] {
+    const stored = localStorage.getItem('eldri_provider');
+    if (stored && ['openai', 'openrouter', 'deepseek', 'groq', 'gemini'].includes(stored)) {
+      return stored as AppSettings['provider'];
+    }
+    return this.getSettings().provider;
+  },
+
+  getActiveModel(): string {
+    return localStorage.getItem('eldri_model') || this.getSettings().model;
   },
 
   getSystemPrompt(mode: string): string {
