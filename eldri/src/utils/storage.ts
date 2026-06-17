@@ -7,10 +7,12 @@ export interface SessionLog {
   screenshot?: string;
 }
 
+import { AppTheme, normalizeTheme } from './themeTokens';
+
 export interface AppSettings {
   provider: 'openai' | 'openrouter' | 'deepseek' | 'groq' | 'gemini';
   model: string;
-  theme: 'dark' | 'light';
+  theme: AppTheme;
   customPrompts: { [key: string]: string };
 }
 
@@ -23,7 +25,7 @@ const DEFAULT_PROMPTS: { [key: string]: string } = {
 const DEFAULT_SETTINGS: AppSettings = {
   provider: 'openai',
   model: 'gpt-4o',
-  theme: 'dark',
+  theme: 'light',
   customPrompts: DEFAULT_PROMPTS
 };
 
@@ -33,7 +35,12 @@ export const AppStorage = {
     if (!data) return DEFAULT_SETTINGS;
     try {
       const parsed = JSON.parse(data);
-      return { ...DEFAULT_SETTINGS, ...parsed, customPrompts: { ...DEFAULT_PROMPTS, ...(parsed.customPrompts || {}) } };
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        theme: normalizeTheme(parsed.theme),
+        customPrompts: { ...DEFAULT_PROMPTS, ...(parsed.customPrompts || {}) },
+      };
     } catch {
       return DEFAULT_SETTINGS;
     }

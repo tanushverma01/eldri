@@ -1,12 +1,11 @@
-import { AppSettings } from './storage';
+import { AppTheme, normalizeTheme } from './themeTokens';
 
-export function applyTheme(theme: AppSettings['theme']) {
+export function applyTheme(theme: AppTheme | string) {
+  const normalized = normalizeTheme(theme);
   const root = window.document.documentElement;
-  if (theme === 'light') {
-    root.classList.remove('dark');
-    root.classList.add('light');
-  } else {
-    root.classList.remove('light');
-    root.classList.add('dark');
-  }
+  root.setAttribute('data-theme', normalized);
+  root.classList.remove('light', 'dark', 'mono', 'purple');
+  root.classList.add(normalized === 'light' ? 'light' : normalized);
 }
+
+export type { AppTheme };

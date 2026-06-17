@@ -1,13 +1,27 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Target, Search, RefreshCw, Layers, Star, Copy } from 'lucide-react';
+import {
+  SlidersHorizontal,
+  ChevronDown,
+  Star,
+  RotateCcw,
+  Minus,
+  Square,
+  Copy,
+  Loader2,
+} from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { register } from '@tauri-apps/plugin-global-shortcut';
-import { AppStorage, AppSettings } from './utils/storage';
+import { AppStorage, AppSettings, SessionLog } from './utils/storage';
+import { getThemeTokens, ThemeTokens } from './utils/themeTokens';
+import { applyTheme } from './utils/theme';
 
 interface StreamErrorState {
   hasError: boolean;
   message: string;
 }
+
+const MODES = ['Code Reviewer', 'Interview Helper', 'Exam Solver'] as const;
 
 function resolveGatewayUrl(provider: AppSettings['provider']): string {
   switch (provider) {
@@ -24,7 +38,7 @@ function resolveGatewayUrl(provider: AppSettings['provider']): string {
   }
 }
 
-function parseResponseSegments(text: string, isLight: boolean) {
+function parseResponseSegments(text: string, t: ThemeTokens) {
   const components: React.ReactNode[] = [];
   const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
   let matchResult;
@@ -33,7 +47,7 @@ function parseResponseSegments(text: string, isLight: boolean) {
   while ((matchResult = codeBlockRegex.exec(text)) !== null) {
     if (matchResult.index > lastIndex) {
       components.push(
-        <p key={`text-${lastIndex}`} className={`text-xs leading-relaxed mb-2 whitespace-pre-wrap ${isLight ? 'text-zinc-800' : 'text-zinc-200'}`}>
+        <p key={`text-${lastIndex}`} className={`text-[13px] leading-relaxed mb-2 whitespace-pre-wrap ${t.textSecondary}`}>
           {text.substring(lastIndex, matchResult.index)}
         </p>
       );
@@ -43,8 +57,8 @@ function parseResponseSegments(text: string, isLight: boolean) {
     const codeSnippet = matchResult[2];
 
     components.push(
-      <div key={`code-${matchResult.index}`} className={`my-2 rounded-lg border overflow-hidden font-mono text-[11px] ${isLight ? 'border-zinc-200 bg-zinc-50' : 'border-[#333333] bg-[#111116]'}`}>
-        <div className={`flex items-center justify-between px-3 py-1 text-[10px] ${isLight ? 'bg-zinc-100 text-zinc-500' : 'bg-[#1A1A22] text-zinc-400'}`}>
+      <div key={`code-${matchResult.index}`} className={`my-2 rounded-lg border overflow-hidden font-mono text-[11px] ${t.card} ${t.cardBorder}`}>
+        <div className={`flex items-center justify-between px-3 py-1 text-[10px] ${t.textMuted}`}>
           <span>{language.toUpperCase()}</span>
           <button
             type="button"
@@ -54,7 +68,7 @@ function parseResponseSegments(text: string, isLight: boolean) {
             <Copy size={10} /> Copy
           </button>
         </div>
-        <pre className={`p-2 overflow-x-auto whitespace-pre-wrap ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+        <pre className={`p-2.5 overflow-x-auto whitespace-pre-wrap ${t.isDark ? 'text-emerald-400/90' : 'text-emerald-700'}`}>
           <code>{codeSnippet}</code>
         </pre>
       </div>
@@ -64,7 +78,7 @@ function parseResponseSegments(text: string, isLight: boolean) {
 
   if (lastIndex < text.length) {
     components.push(
-      <p key={`text-${lastIndex}`} className={`text-xs leading-relaxed whitespace-pre-wrap ${isLight ? 'text-zinc-800' : 'text-zinc-200'}`}>
+      <p key={`text-${lastIndex}`} className={`text-[13px] leading-relaxed whitespace-pre-wrap ${t.textSecondary}`}>
         {text.substring(lastIndex)}
       </p>
     );
@@ -79,11 +93,13 @@ export default function Widget() {
   const [response, setResponse] = useState('');
   const [errorStatus, setErrorStatus] = useState<StreamErrorState>({ hasError: false, message: '' });
   const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
-  const [currentMode, setCurrentMode] = useState('Code Reviewer');
+  const [currentMode, setCurrentMode] = useState<string>('Interview Helper');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [config, setConfig] = useState(AppStorage.getSettings());
+  const [lastSession, setLastSession] = useState<SessionLog | null>(null);
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const accumulatorBufferRef = useRef('');
 
   useEffect(() => {
@@ -93,8 +109,13 @@ export default function Widget() {
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [response, screenshotPreview]);
+    const sessions = AppStorage.getSessions();
+    setLastSession(sessions[0] ?? null);
+  }, [response]);
+
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: contentRef.current.scrollHeight, behavior: 'smooth' });
+  }, [response, isAnalyzing]);
 
   const streamVisionPayload = useCallback(async (
     base64Image: string,
@@ -198,6 +219,7 @@ export default function Widget() {
     setResponse('');
     setErrorStatus({ hasError: false, message: '' });
     setScreenshotPreview(null);
+    setIsPanelCollapsed(false);
 
     try {
       const base64Image = await invoke<string>('capture_screen');
@@ -221,12 +243,30 @@ export default function Widget() {
       );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed workspace execution.';
-      setErrorStatus((prev) => prev.hasError ? prev : { hasError: true, message });
+      setErrorStatus((prev) => (prev.hasError ? prev : { hasError: true, message }));
       console.error('Vision routing loop broken:', err);
     } finally {
       setIsAnalyzing(false);
     }
   }, [isAnalyzing, userInput, currentMode, streamVisionPayload]);
+
+  const handleRecap = () => {
+    if (!lastSession) return;
+    setCurrentMode(lastSession.mode);
+    setUserInput(lastSession.query);
+    setResponse(lastSession.response);
+    setScreenshotPreview(lastSession.screenshot ?? null);
+    setErrorStatus({ hasError: false, message: '' });
+    setIsPanelCollapsed(false);
+  };
+
+  const handleMinimize = async () => {
+    try {
+      await getCurrentWindow().hide();
+    } catch (err) {
+      console.error('Minimize failed:', err);
+    }
+  };
 
   useEffect(() => {
     const initShortcut = async () => {
@@ -241,126 +281,170 @@ export default function Widget() {
     initShortcut();
   }, [triggerVisionEngine]);
 
-  const isLight = config.theme === 'light';
-  const parsedSegments = response ? parseResponseSegments(response, isLight) : null;
+  useEffect(() => {
+    applyTheme(config.theme);
+  }, [config.theme]);
+
+  const t = getThemeTokens(config.theme);
+  const parsedSegments = response ? parseResponseSegments(response, t) : null;
+  const hasRecap = Boolean(lastSession);
+  const showOutput = Boolean(response) || isAnalyzing || errorStatus.hasError;
 
   return (
-    <div className="h-screen w-screen flex flex-col items-center justify-start bg-transparent p-4 font-sans antialiased overflow-hidden select-none transition-colors duration-200">
+    <div className="h-screen w-screen flex flex-col items-center justify-start bg-transparent p-3 font-sans antialiased overflow-hidden select-none transition-colors duration-200">
       <div
         data-tauri-drag-region
-        className={`flex items-center gap-1.5 p-1.5 pr-2.5 backdrop-blur-3xl rounded-full border shadow-xl mb-4 cursor-move shrink-0 z-50 ${
-          isLight ? 'bg-white/95 text-zinc-800 border-zinc-200' : 'bg-[#16161A]/95 text-white border-[#333333]/50'
-        }`}
+        className={`flex items-center gap-2 px-2 py-1.5 rounded-full border shadow-2xl mb-2 cursor-move shrink-0 backdrop-blur-xl ${t.widgetShell}`}
       >
-        <div className={`w-2 h-2 rounded-full ${isAnalyzing ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
-        <div data-tauri-drag-region className="bg-purple-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-serif italic font-bold text-sm shrink-0">e</div>
-        <p data-tauri-drag-region className={`text-[10px] font-extrabold uppercase tracking-widest px-1 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>Eldri Vision</p>
-        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${isLight ? 'text-zinc-400 border-zinc-200 bg-zinc-50' : 'text-zinc-500 border-[#333333] bg-[#111116]'}`}>Alt+Space</span>
+        <div data-tauri-drag-region className={`w-7 h-7 rounded-full flex items-center justify-center font-serif italic font-bold text-sm shrink-0 ${t.logoBg} ${t.logoText}`}>
+          e
+        </div>
+
+        <button
+          type="button"
+          onClick={handleMinimize}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-colors ${t.widgetWellHover}`}
+        >
+          <Minus size={12} strokeWidth={2.5} />
+          Minimize
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsPanelCollapsed((v) => !v)}
+          className={`p-1.5 rounded-lg transition-colors ${t.textMuted} hover:opacity-80`}
+          title={isPanelCollapsed ? 'Expand panel' : 'Collapse panel'}
+        >
+          <Square size={13} strokeWidth={2} />
+        </button>
       </div>
 
-      <div className={`w-full flex-1 flex flex-col rounded-2xl border shadow-2xl p-3 relative overflow-hidden transition-all ${
-        isLight ? 'bg-white border-zinc-200' : 'bg-[#16161A] border-[#333333]/70'
-      }`}>
-        <div data-tauri-drag-region className="w-full h-1.5 cursor-move shrink-0" />
+      {!isPanelCollapsed && (
+        <div className={`w-full flex-1 flex flex-col rounded-2xl border shadow-2xl backdrop-blur-xl overflow-hidden transition-all min-h-0 ${t.widgetPanel}`}>
+          <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2 shrink-0">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${t.widgetWell} ${t.text}`}
+              >
+                <SlidersHorizontal size={11} className={t.textMuted} />
+                <span className="max-w-[110px] truncate">{currentMode}</span>
+                <ChevronDown size={11} className={`transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
 
-        <div className="flex-1 overflow-y-auto mb-3 pr-1 flex flex-col gap-2">
-          {errorStatus.hasError ? (
-            <div className={`rounded-lg p-2.5 border ${isLight ? 'bg-red-50 border-red-200' : 'bg-red-950/40 border-red-800/50'}`}>
-              <p className={`text-xs font-semibold mb-1 ${isLight ? 'text-red-600' : 'text-red-400'}`}>Stream Instability Alert</p>
-              <p className={`text-[11px] leading-relaxed ${isLight ? 'text-red-500' : 'text-red-300/90'}`}>{errorStatus.message}</p>
-            </div>
-          ) : response || screenshotPreview ? (
-            <div className="flex flex-col gap-3">
-              {parsedSegments && <div className="px-1 animate-in fade-in duration-200">{parsedSegments}</div>}
-              {screenshotPreview && (
-                <div className={`rounded-xl overflow-hidden border max-h-36 relative bg-black/10 shadow-inner shrink-0 ${
-                  isLight ? 'border-zinc-200' : 'border-[#333333]'
-                }`}>
-                  <img src={screenshotPreview} alt="Desktop capture" className="w-full h-full object-cover" />
+              {isDropdownOpen && (
+                <div className={`absolute top-full left-0 mt-1 w-44 border rounded-xl shadow-2xl overflow-hidden py-1 z-50 ${t.card} ${t.cardBorder}`}>
+                  {MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setCurrentMode(mode);
+                        setIsDropdownOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-[11px] font-medium transition-colors ${
+                        currentMode === mode ? `${t.navActive}` : `${t.navIdle}`
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
                 </div>
               )}
-              <div ref={bottomRef} />
             </div>
-          ) : (
-            <div data-tauri-drag-region className="flex-1 flex flex-col items-center justify-center text-center p-6 cursor-move">
-              <Target size={26} className="mb-2 text-purple-500 opacity-60 animate-pulse" />
-              <p className={`text-[10px] font-bold tracking-widest uppercase ${isLight ? 'text-zinc-400' : 'text-zinc-500'}`}>System Capture Standby</p>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={triggerVisionEngine}
+                disabled={isAnalyzing}
+                className={`flex items-center gap-1 text-[11px] font-semibold transition-all disabled:opacity-40 ${t.text} ${t.accent}`}
+              >
+                {isAnalyzing ? <Loader2 size={12} className="animate-spin" /> : <Star size={12} strokeWidth={2} />}
+                Analyse
+              </button>
+
+              <button
+                type="button"
+                onClick={handleRecap}
+                disabled={!hasRecap || isAnalyzing}
+                className={`flex items-center gap-1 text-[11px] font-medium transition-all disabled:opacity-30 ${t.textMuted}`}
+              >
+                <RotateCcw size={11} strokeWidth={2} />
+                Recap
+              </button>
             </div>
-          )}
-        </div>
-
-        <div className={`flex justify-between items-center pb-2.5 mb-2.5 border-b gap-2 shrink-0 relative z-40 ${
-          isLight ? 'border-zinc-100' : 'border-[#333333]/60'
-        }`}>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className={`flex items-center gap-2 p-1.5 px-2.5 border rounded-xl text-[11px] font-bold transition-all ${
-                isLight ? 'bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100' : 'bg-[#22222A] border-[#333333] text-zinc-300 hover:bg-[#2D2D3D]'
-              }`}
-            >
-              <Layers size={12} className="text-purple-500" />
-              {currentMode}
-            </button>
-
-            {isDropdownOpen && (
-              <div className={`absolute bottom-full left-0 mb-1 w-40 border rounded-xl shadow-2xl overflow-hidden py-1 ${
-                isLight ? 'bg-white border-zinc-200' : 'bg-[#16161E] border-[#333333]'
-              }`}>
-                {['Code Reviewer', 'Interview Helper', 'Exam Solver'].map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => {
-                      setCurrentMode(mode);
-                      setIsDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
-                      isLight ? 'text-zinc-600 hover:bg-zinc-50 hover:text-purple-600' : 'text-zinc-400 hover:bg-purple-600/20 hover:text-white'
-                    }`}
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
-          <button
-            type="button"
-            onClick={triggerVisionEngine}
-            disabled={isAnalyzing}
-            className="flex items-center gap-1 text-[11px] font-bold text-purple-500 hover:text-purple-400 disabled:opacity-40 transition-colors"
-          >
-            <Star size={12} fill="currentColor" /> Analyze
-          </button>
-        </div>
+          <div className={`mx-3 border-t ${t.divider}`} />
 
-        <div className={`p-1.5 rounded-xl border flex items-center shadow-md gap-2 shrink-0 ${
-          isLight ? 'bg-zinc-50 border-zinc-200' : 'bg-[#111116] border-[#333333]/80'
-        }`}>
-          <Search size={14} className="ml-1 text-zinc-500 shrink-0" />
-          <input
-            type="text"
-            value={userInput}
-            onChange={(e) => setUserInput(e.target.value)}
-            placeholder="Ask a question or focus criteria..."
-            className={`flex-1 bg-transparent text-xs outline-none p-1 font-semibold ${isLight ? 'text-zinc-800 placeholder:text-zinc-300' : 'text-zinc-100 placeholder:text-zinc-700'}`}
-            onKeyDown={(e) => e.key === 'Enter' && !isAnalyzing && triggerVisionEngine()}
-          />
-          <button
-            type="button"
-            onClick={triggerVisionEngine}
-            disabled={isAnalyzing}
-            className={`p-2 rounded-lg transition-all ${
-              isAnalyzing ? 'bg-purple-900/20 text-purple-400' : 'bg-purple-600 hover:bg-purple-500 text-white shadow-md'
-            }`}
-          >
-            {isAnalyzing ? <RefreshCw size={12} className="animate-spin" /> : <Star size={12} />}
-          </button>
+          <div className="flex-1 flex flex-col p-3 min-h-0">
+            <div ref={contentRef} className={`flex-1 rounded-xl border overflow-y-auto p-3 min-h-[140px] transition-colors ${t.widgetWell}`}>
+              {errorStatus.hasError ? (
+                <div className={`rounded-lg p-2.5 border ${t.isDark ? 'bg-red-950/30 border-red-800/40' : 'bg-red-50 border-red-200'}`}>
+                  <p className={`text-[11px] font-semibold mb-0.5 ${t.isDark ? 'text-red-400' : 'text-red-600'}`}>Stream error</p>
+                  <p className={`text-[11px] leading-relaxed ${t.isDark ? 'text-red-300/90' : 'text-red-500'}`}>{errorStatus.message}</p>
+                </div>
+              ) : showOutput ? (
+                <div className="space-y-2">
+                  {isAnalyzing && !response && (
+                    <div className={`flex items-center gap-2 text-[12px] ${t.textMuted}`}>
+                      <Loader2 size={13} className="animate-spin" />
+                      Capturing workspace…
+                    </div>
+                  )}
+                  {parsedSegments}
+                  {screenshotPreview && (
+                    <div className={`mt-2 rounded-lg overflow-hidden border max-h-24 ${t.cardBorder}`}>
+                      <img src={screenshotPreview} alt="Capture preview" className="w-full h-full object-cover opacity-90" />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  placeholder="Type something, or AI output appears here..."
+                  className={`w-full h-full min-h-[120px] bg-transparent text-[13px] leading-relaxed resize-none outline-none ${t.text} ${t.isDark ? 'placeholder:text-zinc-500' : 'placeholder:text-gray-400'}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !isAnalyzing) {
+                      e.preventDefault();
+                      triggerVisionEngine();
+                    }
+                  }}
+                />
+              )}
+            </div>
+
+            {showOutput && !errorStatus.hasError && (
+              <div className={`mt-2 flex items-center gap-2 px-3 py-2 rounded-xl border ${t.widgetWell}`}>
+                <input
+                  type="text"
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  placeholder="Ask a follow-up…"
+                  className={`flex-1 bg-transparent text-[12px] outline-none ${t.textSecondary} ${t.isDark ? 'placeholder:text-zinc-500' : 'placeholder:text-gray-400'}`}
+                  onKeyDown={(e) => e.key === 'Enter' && !isAnalyzing && triggerVisionEngine()}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResponse('');
+                    setScreenshotPreview(null);
+                    setUserInput('');
+                  }}
+                  className={`text-[10px] font-medium px-2 py-0.5 rounded-md transition-colors ${t.textMuted} hover:opacity-80`}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+
+            <p className={`text-[9px] text-center mt-2 font-mono ${t.textMuted}`}>Alt + Space to analyse</p>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
