@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320">
+  <rect width="320" height="320" rx="72" fill="#000000" />
+  <g transform="translate(60, 60)">
+    <defs>
+      <mask id="e-mask">
+        <path d="M 65,115 C 125,100 135,80 120,55 C 105,30 55,40 45,75 C 35,110 40,165 90,170 C 135,175 160,140 165,120" fill="none" stroke="#ffffff" stroke-width="45" stroke-linecap="round" stroke-linejoin="round" />
+      </mask>
+      <filter id="global-inner">
+        <feOffset in="SourceAlpha" dx="3" dy="5" result="offset_shadow" />
+        <feGaussianBlur in="offset_shadow" stdDeviation="5" result="blur_shadow" />
+        <feComposite in="SourceAlpha" in2="blur_shadow" operator="out" result="shadow_mask" />
+        <feFlood flood-color="#a3a3a3" flood-opacity="0.45" result="color_shadow" />
+        <feComposite in="color_shadow" in2="shadow_mask" operator="in" result="inner_shadow" />
+        <feOffset in="SourceAlpha" dx="-3" dy="-4" result="offset_hl" />
+        <feGaussianBlur in="offset_hl" stdDeviation="4" result="blur_hl" />
+        <feComposite in="SourceAlpha" in2="blur_hl" operator="out" result="hl_mask" />
+        <feFlood flood-color="#ffffff" flood-opacity="0.8" result="color_hl" />
+        <feComposite in="color_hl" in2="hl_mask" operator="in" result="inner_hl" />
+        <feMerge>
+          <feMergeNode in="SourceGraphic" />
+          <feMergeNode in="inner_shadow" />
+          <feMergeNode in="inner_hl" />
+        </feMerge>
+      </filter>
+      <filter id="fold-blur">
+        <feGaussianBlur stdDeviation="8" />
+      </filter>
+      <linearGradient id="top-segment" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#ffffff" />
+        <stop offset="100%" stop-color="#ededed" />
+      </linearGradient>
+    </defs>
+    <g filter="url(#global-inner)">
+      <g mask="url(#e-mask)">
+        <rect width="200" height="200" fill="#ffffff" />
+        <circle cx="55" cy="120" r="24" fill="#000000" opacity="0.4" filter="url(#fold-blur)" />
+        <path d="M 45,75 C 35,110 40,165 90,170 C 135,175 160,140 165,120" fill="none" stroke="url(#top-segment)" stroke-width="47" stroke-linecap="round" stroke-linejoin="round" />
+      </g>
+    </g>
+  </g>
+</svg>

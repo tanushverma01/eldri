@@ -1,3 +1,6 @@
+import logoDark from '../assets/v1.svg';
+import logoLight from '../assets/v2.svg';
+
 export type AppTheme = 'light' | 'mono' | 'purple';
 
 export interface ThemeTokens {
@@ -29,6 +32,7 @@ export interface ThemeTokens {
   divider: string;
   logoBg: string;
   logoText: string;
+  logo: string;
   isDark: boolean;
   widgetShell: string;
   widgetPanel: string;
@@ -66,6 +70,7 @@ const THEMES: Record<AppTheme, ThemeTokens> = {
     divider: 'border-gray-200',
     logoBg: 'bg-black',
     logoText: 'text-white',
+    logo: logoDark,
     isDark: false,
     widgetShell: 'bg-white/95 border-zinc-200/80',
     widgetPanel: 'bg-[#F4F4F5]/95 border-zinc-200/90',
@@ -101,6 +106,7 @@ const THEMES: Record<AppTheme, ThemeTokens> = {
     divider: 'border-zinc-800',
     logoBg: 'bg-white',
     logoText: 'text-black',
+    logo: logoLight,
     isDark: true,
     widgetShell: 'bg-black/95 border-zinc-700/60',
     widgetPanel: 'bg-[#111111]/95 border-zinc-800/80',
@@ -136,6 +142,7 @@ const THEMES: Record<AppTheme, ThemeTokens> = {
     divider: 'border-[#2D263F]',
     logoBg: 'bg-[#8B5CF6]',
     logoText: 'text-white',
+    logo: logoDark,
     isDark: true,
     widgetShell: 'bg-[#1A1625]/95 border-[#3D3555]/60',
     widgetPanel: 'bg-[#1E1A2E]/95 border-[#3D3555]/70',

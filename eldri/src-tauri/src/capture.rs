@@ -1,7 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
-use image::{imageops::FilterType, DynamicImage, ImageFormat, RgbaImage};
+use image::{imageops::FilterType, DynamicImage, RgbaImage};
 use screenshots::Screen;
-use std::io::Cursor;
 use tauri::Window;
 
 pub async fn capture_screen(window: Window) -> Result<String, String> {
@@ -14,7 +13,8 @@ pub async fn capture_screen(window: Window) -> Result<String, String> {
         .hide()
         .map_err(|e| format!("Failed to hide window: {}", e))?;
 
-    tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+    // Optimization: reduce sleep duration from 180ms to 80ms for snappier captures
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
 
     let screens = Screen::all().map_err(|e| format!("Screen scan failure: {}", e))?;
     if screens.is_empty() {
@@ -56,16 +56,20 @@ pub async fn capture_screen(window: Window) -> Result<String, String> {
     let processed_img = if width > target_width {
         let reduction_ratio = target_width as f32 / width as f32;
         let target_height = (height as f32 * reduction_ratio) as u32;
-        dynamic_img.resize(target_width, target_height, FilterType::Lanczos3)
+        // Optimization: Use Triangle filter instead of Lanczos3 for faster resizing
+        dynamic_img.resize(target_width, target_height, FilterType::Triangle)
     } else {
         dynamic_img
     };
 
     let mut image_bytes_buffer = Vec::new();
-    let mut memory_cursor = Cursor::new(&mut image_bytes_buffer);
-    processed_img
-        .write_to(&mut memory_cursor, ImageFormat::Jpeg)
-        .map_err(|e| format!("Image compression write failure: {}", e))?;
+    {
+        // Optimization: Use JpegEncoder with fixed 80 quality for speed and network compression
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut image_bytes_buffer, 80);
+        processed_img
+            .write_with_encoder(encoder)
+            .map_err(|e| format!("Image compression write failure: {}", e))?;
+    }
 
     let base64_payload = general_purpose::STANDARD.encode(&image_bytes_buffer);
     Ok(format!("data:image/jpeg;base64,{}", base64_payload))

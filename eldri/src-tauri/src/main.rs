@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Deserialize;
-use tauri::{Manager, Window};
+use tauri::{Manager, Window, State};
 
 #[derive(Deserialize)]
 struct AiRequest {
@@ -29,8 +29,10 @@ async fn get_secure_key(provider: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
-    let client = reqwest::Client::new();
+async fn analyze_with_eldri(
+    req: AiRequest,
+    client: State<'_, reqwest::Client>
+) -> Result<String, String> {
     let image_b64 = req
         .image_base64
         .strip_prefix("data:image/jpeg;base64,")
@@ -43,11 +45,12 @@ async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
     };
 
     match req.provider.as_str() {
-        "openai" | "groq" => {
-            let url = if req.provider == "groq" {
-                "https://api.groq.com/openai/v1/chat/completions"
-            } else {
-                "https://api.openai.com/v1/chat/completions"
+        "openai" | "groq" | "openrouter" | "deepseek" => {
+            let url = match req.provider.as_str() {
+                "groq" => "https://api.groq.com/openai/v1/chat/completions",
+                "openrouter" => "https://openrouter.ai/api/v1/chat/completions",
+                "deepseek" => "https://api.deepseek.com/v1/chat/completions",
+                _ => "https://api.openai.com/v1/chat/completions",
             };
 
             let response = client
@@ -61,26 +64,33 @@ async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
                             { "type": "text", "text": req.prompt },
                             { "type": "image_url", "image_url": { "url": format!("data:{};base64,{}", image_mime, image_b64) } }
                         ]
-                    }]
+                    }],
+                    "max_tokens": 4096
                 }))
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| format!("Network request failed for provider '{}': {}", req.provider, e))?;
 
-            let res: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(format!("API error ({}): {}", status, body));
+            }
+
+            let res: serde_json::Value = response.json().await.map_err(|e| format!("Failed to parse response: {}", e))?;
             Ok(res["choices"][0]["message"]["content"]
                 .as_str()
-                .unwrap_or("Eldri couldn't think of an answer.")
+                .unwrap_or("No response generated.")
                 .to_string())
         }
         "anthropic" => {
             let response = client
                 .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", req.api_key)
+                .header("x-api-key", &req.api_key)
                 .header("anthropic-version", "2023-06-01")
                 .json(&serde_json::json!({
                     "model": req.model,
-                    "max_tokens": 1024,
+                    "max_tokens": 4096,
                     "messages": [{
                         "role": "user",
                         "content": [
@@ -91,20 +101,67 @@ async fn analyze_with_eldri(req: AiRequest) -> Result<String, String> {
                 }))
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| format!("Anthropic request failed: {}", e))?;
 
-            let res: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(format!("Anthropic API error ({}): {}", status, body));
+            }
+
+            let res: serde_json::Value = response.json().await.map_err(|e| format!("Failed to parse Anthropic response: {}", e))?;
             Ok(res["content"][0]["text"]
                 .as_str()
-                .unwrap_or("Eldri is silent.")
+                .unwrap_or("No response generated.")
                 .to_string())
         }
-        _ => Err("Provider not implemented".into()),
+        "gemini" => {
+            // Gemini uses the OpenAI-compatible endpoint
+            let response = client
+                .post("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+                .header("Authorization", format!("Bearer {}", req.api_key))
+                .json(&serde_json::json!({
+                    "model": req.model,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            { "type": "text", "text": req.prompt },
+                            { "type": "image_url", "image_url": { "url": format!("data:{};base64,{}", image_mime, image_b64) } }
+                        ]
+                    }],
+                    "max_tokens": 4096
+                }))
+                .send()
+                .await
+                .map_err(|e| format!("Gemini request failed: {}", e))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(format!("Gemini API error ({}): {}", status, body));
+            }
+
+            let res: serde_json::Value = response.json().await.map_err(|e| format!("Failed to parse Gemini response: {}", e))?;
+            Ok(res["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap_or("No response generated.")
+                .to_string())
+        }
+        _ => Err(format!("Provider '{}' is not supported. Use openai, anthropic, groq, openrouter, deepseek, or gemini.", req.provider)),
     }
 }
 
 fn main() {
-  let mut builder = tauri::Builder::default()
+    // Shared HTTP client with connection pool for fast provider streaming
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .pool_max_idle_per_host(5)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let mut builder = tauri::Builder::default()
+        .manage(client)
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             capture_screen,
@@ -124,6 +181,15 @@ fn main() {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         builder = builder
+            .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+                println!("New instance deep link argv: {:?}", argv);
+                let _ = app.get_webview_window("main").map(|w| {
+                    let _ = w.show();
+                    let _ = w.unminimize();
+                    let _ = w.set_focus();
+                });
+            }))
+            .plugin(tauri_plugin_deep_link::init())
             .plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .build(),

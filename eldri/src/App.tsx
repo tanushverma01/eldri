@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import LoginScreen from './components/LoginScreen';
 import PlanSelectionScreen from './components/PlanSelectionScreen';
 import Dashboard from './Dashboard';
@@ -7,56 +7,127 @@ import Widget from './Widget';
 
 type AuthState = 'login' | 'plans' | 'authenticated';
 
-function isAuthenticated(): boolean {
-  return localStorage.getItem('eldri_auth_state') === 'authenticated';
+function getInitialAuthState(): AuthState {
+  const state = localStorage.getItem('eldri_auth_state');
+  if (state === 'authenticated') return 'authenticated';
+  if (state === 'plans') return 'plans';
+  return 'login';
+}
+
+// Detect window type from the HTML file path — synchronous, no race condition
+function detectWindowLabel(): string {
+  try {
+    const path = window.location.pathname || '';
+    if (path.includes('widget')) return 'widget';
+  } catch {
+    // ignore
+  }
+  return 'main';
 }
 
 export default function App() {
-  const [windowLabel, setWindowLabel] = useState<string | null>(null);
-  const [authState, setAuthState] = useState<AuthState>(() =>
-    isAuthenticated() ? 'authenticated' : 'login'
-  );
+  const windowLabel = detectWindowLabel();
+  const [authState, setAuthState] = useState<AuthState>(() => getInitialAuthState());
 
+  // Set up deep link listener for OAuth callback
   useEffect(() => {
-    try {
-      setWindowLabel(getCurrentWindow().label);
-    } catch {
-      setWindowLabel('main');
-    }
-  }, []);
+    if (windowLabel !== 'main') return;
+
+    let unsubscribe: (() => void) | undefined;
+
+    const setupDeepLink = async () => {
+      try {
+        unsubscribe = await onOpenUrl((urls) => {
+          console.log('Received deep link urls:', urls);
+          for (const urlStr of urls) {
+            try {
+              const url = new URL(urlStr);
+              const isCallback =
+                url.host === 'auth-callback' ||
+                url.pathname.includes('auth-callback') ||
+                url.pathname.includes('callback');
+
+              if (isCallback) {
+                let accessToken = url.searchParams.get('access_token');
+                let email = url.searchParams.get('email');
+
+                // Fallback to checking hash fragments (common in OAuth redirects)
+                if (!accessToken || !email) {
+                  const hash = url.hash.startsWith('#') ? url.hash.substring(1) : url.hash;
+                  const hashParams = new URLSearchParams(hash);
+                  accessToken = accessToken || hashParams.get('access_token') || hashParams.get('token');
+                  email = email || hashParams.get('email');
+                }
+
+                if (accessToken && email) {
+                  localStorage.setItem('eldri_auth_token', accessToken);
+                  localStorage.setItem('eldri_auth_email', email);
+                  localStorage.setItem('eldri_auth_state', 'plans');
+                  setAuthState('plans');
+                }
+              }
+            } catch (e) {
+              console.error('Failed to parse deep link URL:', urlStr, e);
+            }
+          }
+        });
+      } catch (err) {
+        console.error('Failed to register deep link listener:', err);
+      }
+    };
+
+    setupDeepLink();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [windowLabel]);
 
   const completeAuth = (plan: string) => {
     localStorage.setItem('eldri_selected_plan', plan);
     localStorage.setItem('eldri_auth_state', 'authenticated');
+
+    // Store trial start date when plan is selected
+    if (!localStorage.getItem('eldri_trial_start')) {
+      localStorage.setItem('eldri_trial_start', new Date().toISOString());
+    }
+
     setAuthState('authenticated');
   };
 
-  if (windowLabel === null) {
-    return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#F3F4F6]">
-        <div className="w-8 h-8 rounded-full bg-black text-white flex items-center justify-center font-serif italic font-bold animate-pulse">
-          e
-        </div>
-      </div>
-    );
-  }
-
+  // Widget window renders Widget component directly
   if (windowLabel === 'widget') {
     return <Widget />;
   }
 
+  // Main window auth flow
   if (authState === 'login') {
-    return <LoginScreen onLoginSuccess={() => setAuthState('plans')} />;
+    return (
+      <LoginScreen
+        onLoginSuccess={() => {
+          localStorage.setItem('eldri_auth_token', 'test-token');
+          localStorage.setItem('eldri_auth_email', 'beta-tester@eldri.app');
+          localStorage.setItem('eldri_auth_state', 'plans');
+          setAuthState('plans');
+        }}
+      />
+    );
   }
 
   if (authState === 'plans') {
     return <PlanSelectionScreen onPlanSelected={completeAuth} />;
   }
 
+  // authState === 'authenticated' — render Dashboard
   return (
     <Dashboard
       onSignOut={() => {
         localStorage.removeItem('eldri_auth_state');
+        localStorage.removeItem('eldri_auth_token');
+        localStorage.removeItem('eldri_auth_email');
+        localStorage.removeItem('eldri_selected_plan');
         setAuthState('login');
       }}
     />

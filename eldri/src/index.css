@@ -16,10 +16,17 @@ body,
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Main dashboard window — solid background (widget.html sets its own transparency) */
-body {
+/* Theme-aware body background styles */
+html[data-theme='light'] body, body {
   background-color: #f3f4f6;
 }
+html[data-theme='mono'] body {
+  background-color: #000000;
+}
+html[data-theme='purple'] body {
+  background-color: #121016;
+}
+
 
 /* Smooth scrollbar styling */
 * {
@@ -71,3 +78,42 @@ input:focus, select:focus, textarea:focus {
 ::selection {
   background-color: rgba(0, 0, 0, 0.12);
 }
+
+/* Custom geometric animations */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spin-reverse-slow {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.5; }
+  50% { opacity: 0.3; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+@keyframes voice-bar {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1.0); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 25s linear infinite;
+}
+
+.animate-spin-reverse-slow {
+  animation: spin-reverse-slow 30s linear infinite;
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 3s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+.animate-voice-bar {
+  animation: voice-bar 1.2s ease-in-out infinite;
+}
+
