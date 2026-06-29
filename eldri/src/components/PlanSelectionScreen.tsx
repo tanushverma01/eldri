@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
-import { Check, Crown, Zap, Sparkles, ArrowRight } from 'lucide-react';
-import logoDark from '../assets/v1.svg';
+import { Check, Crown, Zap, Sparkles, ArrowRight, Minus, Square, X } from 'lucide-react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import logoLight from '../assets/v2.svg';
 
 interface PlanSelectionScreenProps {
   onPlanSelected: (plan: string) => void;
@@ -103,14 +104,15 @@ export default function PlanSelectionScreen({ onPlanSelected }: PlanSelectionScr
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-white select-none">
       {/* Top Bar */}
       <motion.div
-        className="flex items-center justify-between px-8 pt-5 pb-2 shrink-0"
+        data-tauri-drag-region
+        className="flex items-center justify-between px-8 pt-5 pb-2 shrink-0 cursor-move"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 relative z-10 pointer-events-auto">
           <motion.img
-            src={logoDark}
+            src={logoLight}
             alt="Eldri Logo"
             className="w-6 h-6 pointer-events-none"
             initial={{ scale: 0, rotate: -20 }}
@@ -119,7 +121,35 @@ export default function PlanSelectionScreen({ onPlanSelected }: PlanSelectionScr
           />
           <span className="text-base font-bold tracking-tight text-black">eldri</span>
         </div>
-        <span className="text-[9px] text-gray-400 font-mono tracking-wider">CHOOSE YOUR PLAN</span>
+        <div className="flex items-center gap-4 relative z-10 pointer-events-auto">
+          <span className="text-[9px] text-gray-400 font-mono tracking-wider">CHOOSE YOUR PLAN</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => getCurrentWindow().minimize()}
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors"
+              title="Minimize"
+            >
+              <Minus size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => getCurrentWindow().toggleMaximize()}
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors"
+              title="Maximize"
+            >
+              <Square size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => getCurrentWindow().close()}
+              className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 hover:text-red-700 transition-colors"
+              title="Close"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
       </motion.div>
 
       {/* Header */}

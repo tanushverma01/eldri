@@ -140,11 +140,20 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
       setFormModel(selectedKey.model);
       setFormLabel(selectedKey.label);
       
-      // Load password from Tauri keyring securely
+      // Load password from Tauri keyring securely, with localStorage fallback
       const loadKey = async () => {
         try {
           const keyName = `eldri_key_${selectedKey.id}`;
-          const secret = await invoke<string>('get_secure_key', { provider: keyName });
+          let secret = '';
+          try {
+            secret = await invoke<string>('get_secure_key', { provider: keyName });
+          } catch (err) {
+            console.warn('Keyring read failed:', err);
+          }
+          // Fallback to localStorage
+          if (!secret) {
+            secret = localStorage.getItem(`eldri_secret_${selectedKey.id}`) || '';
+          }
           setFormKeyVal(secret ? MASKED_KEY : '');
         } catch (err) {
           console.error('Failed to load secure key:', err);
@@ -197,7 +206,14 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
     try {
       const keyName = `eldri_key_${selectedKeyId}`;
       if (formKeyVal && formKeyVal !== MASKED_KEY) {
-        await invoke('save_secure_key', { provider: keyName, key: formKeyVal });
+        // Save to OS keyring (primary)
+        try {
+          await invoke('save_secure_key', { provider: keyName, key: formKeyVal });
+        } catch (err) {
+          console.warn('Keyring save failed, using localStorage fallback:', err);
+        }
+        // Also save to localStorage as fallback
+        localStorage.setItem(`eldri_secret_${selectedKeyId}`, formKeyVal);
       }
 
       // Update local storage configurations
@@ -275,8 +291,8 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
     setSelectedKeyId(newId);
   };
 
-  const inputClass = `w-full border rounded-xl px-4 py-3 text-xs outline-none bg-white dark:bg-zinc-900 ${t.inputBorder} ${t.text} focus:border-black dark:focus:border-white transition-colors`;
-  const selectStyle = `w-full border rounded-xl px-4 py-3 text-xs outline-none appearance-none bg-white dark:bg-zinc-900 ${t.inputBorder} ${t.text} focus:border-black dark:focus:border-white transition-colors cursor-pointer`;
+  const inputClass = `w-full border rounded-xl px-4 py-3 text-xs outline-none ${t.input} ${t.inputBorder} ${t.text} focus:border-current transition-colors`;
+  const selectStyle = `w-full border rounded-xl px-4 py-3 text-xs outline-none appearance-none ${t.input} ${t.inputBorder} ${t.text} focus:border-current transition-colors cursor-pointer`;
 
   return (
     <motion.div
@@ -288,7 +304,7 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
       <motion.h1 variants={item} className={`text-2xl font-bold tracking-tight mb-4 ${t.text}`}>Settings</motion.h1>
 
       {/* Modern Top Theme Toggle */}
-      <motion.div variants={item} className="flex items-center justify-between border rounded-2xl p-4 mb-6 bg-white dark:bg-zinc-900/40 border-gray-200 dark:border-zinc-800">
+      <motion.div variants={item} className={`flex items-center justify-between border rounded-2xl p-4 mb-6 ${t.card} ${t.cardBorder}`}>
         <div>
           <h2 className="text-sm font-semibold">Appearance Theme</h2>
           <p className="text-[10px] text-gray-400 mt-0.5">Toggle between monochrome themes and accent highlights.</p>
@@ -301,8 +317,8 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
               onClick={() => onThemeChange(thm)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase border transition ${
                 theme === thm
-                  ? 'border-black dark:border-white bg-black dark:bg-white text-white dark:text-black font-bold'
-                  : 'border-gray-200 dark:border-zinc-800 text-gray-400 hover:text-black dark:hover:text-white'
+                  ? `${t.btnPrimary} ${t.btnPrimaryText} border-current font-bold`
+                  : `${t.cardBorder} ${t.textMuted} hover:${t.text}`
               }`}
             >
               {thm === 'mono' ? 'Dark Mono' : thm}
@@ -410,8 +426,8 @@ export default function Settings({ theme, onThemeChange }: SettingsProps) {
                           onClick={() => setSelectedKeyId(k.id)}
                           className={`w-full text-left p-3 rounded-xl border text-xs transition ${
                             selectedKeyId === k.id
-                              ? 'border-black dark:border-white bg-black text-white dark:bg-white dark:text-black font-bold'
-                              : 'border-gray-200 dark:border-zinc-800 hover:border-gray-300 hover:bg-gray-50/50'
+                              ? `${t.btnPrimary} ${t.btnPrimaryText} border-current font-bold`
+                              : `${t.cardBorder} hover:border-current/30 hover:bg-black/5 dark:hover:bg-white/5`
                           }`}
                         >
                           <div className="truncate">{k.label}</div>

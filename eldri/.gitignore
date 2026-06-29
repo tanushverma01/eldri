@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude and checklists
+.claude/
+claude/
+BUILD_CHECKLIST.md
+CLAUDE.md
+eldri_complete_flow.md

@@ -108,6 +108,7 @@ export default function Widget() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [lastSession, setLastSession] = useState<SessionLog | null>(null);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   const {
     transcript: voiceTranscript,
@@ -332,16 +333,72 @@ export default function Widget() {
       setScreenshotPreview(base64Image);
 
       const modeConfig = AppStorage.getModeConfig(currentMode);
-      const activeProvider = (modeConfig.provider || AppStorage.getActiveProvider()) as AppSettings['provider'];
-      const activeModel = modeConfig.model || AppStorage.getActiveModel();
-
+      
       // Resolve key securely
       const keysListStr = localStorage.getItem('eldri_api_keys_list');
       const keysList = keysListStr ? JSON.parse(keysListStr) : [];
-      const activeKeyProfile = keysList.find((k: any) => k.provider === activeProvider);
-      const keyName = activeKeyProfile ? `eldri_key_${activeKeyProfile.id}` : activeProvider;
 
-      const secureApiKey = await invoke<string>('get_secure_key', { provider: keyName });
+      console.log('DEBUG: keysList =', keysList);
+
+      let activeProvider = (modeConfig.provider || AppStorage.getActiveProvider()) as AppSettings['provider'];
+      let activeModel = modeConfig.model || AppStorage.getActiveModel();
+      console.log('DEBUG: initial activeProvider =', activeProvider, 'activeModel =', activeModel);
+
+      let activeKeyProfile = keysList.find((k: any) => k.provider === activeProvider);
+      console.log('DEBUG: initial activeKeyProfile =', activeKeyProfile);
+
+      // Fallback: If the mode's provider does not have a configured API key, fall back to the globally selected provider
+      if (!activeKeyProfile) {
+        const globalProvider = AppStorage.getActiveProvider();
+        const globalModel = AppStorage.getActiveModel();
+        console.log('DEBUG: falling back to global provider =', globalProvider, 'globalModel =', globalModel);
+        const globalKeyProfile = keysList.find((k: any) => k.provider === globalProvider);
+        if (globalKeyProfile) {
+          activeProvider = globalProvider;
+          activeModel = globalModel;
+          activeKeyProfile = globalKeyProfile;
+          console.log('DEBUG: fallback activeKeyProfile =', activeKeyProfile);
+        } else if (keysList.length > 0) {
+          // If no global provider key, fall back to the first available configured API key
+          activeProvider = keysList[0].provider;
+          activeModel = keysList[0].model;
+          activeKeyProfile = keysList[0];
+          console.log('DEBUG: fallback first available activeKeyProfile =', activeKeyProfile);
+        }
+      }
+
+      const keyName = activeKeyProfile ? `eldri_key_${activeKeyProfile.id}` : activeProvider;
+      console.log('DEBUG: resolved keyName =', keyName);
+
+      // Try OS keyring first, then fall back to localStorage
+      let secureApiKey = '';
+      try {
+        secureApiKey = await invoke<string>('get_secure_key', { provider: keyName });
+      } catch (err) {
+        console.warn('Keyring read failed:', err);
+      }
+      
+      // Fallback: read from localStorage
+      if (!secureApiKey && activeKeyProfile) {
+        secureApiKey = localStorage.getItem(`eldri_secret_${activeKeyProfile.id}`) || '';
+        console.log('DEBUG: fell back to localStorage, length =', secureApiKey.length);
+      }
+
+      console.log('DEBUG: final secureApiKey length =', secureApiKey ? secureApiKey.length : 0);
+
+      setDebugInfo(JSON.stringify({
+        currentMode,
+        modeProvider: modeConfig.provider,
+        activeProvider,
+        activeModel,
+        keyProfileId: activeKeyProfile?.id,
+        keyName,
+        apiKeyLength: secureApiKey ? secureApiKey.length : 0,
+        keysList: keysList.map((k: any) => ({ id: k.id, provider: k.provider, label: k.label })),
+        localStorageProvider: localStorage.getItem('eldri_provider'),
+        usedFallback: !!(localStorage.getItem(`eldri_secret_${activeKeyProfile?.id}`)),
+      }, null, 2));
+
       if (!secureApiKey) {
         throw new Error(`Missing credentials for "${activeProvider}". Add your API key in Settings.`);
       }
@@ -360,6 +417,43 @@ export default function Widget() {
         currentMode,
       );
     } catch (err: unknown) {
+      try {
+        const modeConfig = AppStorage.getModeConfig(currentMode);
+        const keysListStr = localStorage.getItem('eldri_api_keys_list');
+        const keysList = keysListStr ? JSON.parse(keysListStr) : [];
+        let activeProvider = (modeConfig.provider || AppStorage.getActiveProvider()) as AppSettings['provider'];
+        let activeModel = modeConfig.model || AppStorage.getActiveModel();
+        let activeKeyProfile = keysList.find((k: any) => k.provider === activeProvider);
+        if (!activeKeyProfile) {
+          const globalProvider = AppStorage.getActiveProvider();
+          const globalModel = AppStorage.getActiveModel();
+          const globalKeyProfile = keysList.find((k: any) => k.provider === globalProvider);
+          if (globalKeyProfile) {
+            activeProvider = globalProvider;
+            activeModel = globalModel;
+            activeKeyProfile = globalKeyProfile;
+          } else if (keysList.length > 0) {
+            activeProvider = keysList[0].provider;
+            activeModel = keysList[0].model;
+            activeKeyProfile = keysList[0];
+          }
+        }
+        const keyName = activeKeyProfile ? `eldri_key_${activeKeyProfile.id}` : activeProvider;
+        setDebugInfo(JSON.stringify({
+          error: err instanceof Error ? err.message : String(err),
+          currentMode,
+          modeProvider: modeConfig?.provider,
+          activeProvider,
+          activeModel,
+          keyProfileId: activeKeyProfile?.id,
+          keyName,
+          keysList: keysList.map((k: any) => ({ id: k.id, provider: k.provider, label: k.label })),
+          localStorageProvider: localStorage.getItem('eldri_provider'),
+        }, null, 2));
+      } catch (innerErr) {
+        console.error('Failed to set debug info:', innerErr);
+      }
+
       const message = err instanceof Error ? err.message : 'Analysis failed.';
       setErrorStatus((prev) => (prev.hasError ? prev : { hasError: true, message }));
       console.error('Vision engine error:', err);
@@ -402,14 +496,22 @@ export default function Widget() {
     try {
       resetVoice();
       setIsVoiceActive(false);
+    } catch (err) {
+      console.error('Failed to reset voice:', err);
+    }
 
+    try {
       const main = await WebviewWindow.getByLabel('main');
       if (main) {
         await main.show();
         await main.unminimize();
         await main.setFocus();
       }
+    } catch (err) {
+      console.error('Failed to restore main window:', err);
+    }
 
+    try {
       const current = getCurrentWindow();
       await current.close();
     } catch (err) {
@@ -637,7 +739,12 @@ export default function Widget() {
                 {errorStatus.hasError ? (
                   <div className={`rounded-lg p-2.5 border ${t.isDark ? 'bg-red-950/30 border-red-800/40' : 'bg-red-50 border-red-200'}`}>
                     <p className={`text-[11px] font-semibold mb-0.5 ${t.isDark ? 'text-red-400' : 'text-red-600'}`}>Error</p>
-                    <p className={`text-[11px] leading-relaxed ${t.isDark ? 'text-red-300/90' : 'text-red-500'}`}>{errorStatus.message}</p>
+                    <p className={`text-[11px] leading-relaxed mb-2 ${t.isDark ? 'text-red-300/90' : 'text-red-500'}`}>{errorStatus.message}</p>
+                    {debugInfo && (
+                      <pre className="mt-2 p-2 bg-black/40 text-[9px] font-mono text-zinc-300/90 overflow-x-auto whitespace-pre rounded border border-zinc-800/50">
+                        {debugInfo}
+                      </pre>
+                    )}
                   </div>
                 ) : showOutput ? (
                   <div className="space-y-2">

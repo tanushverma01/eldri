@@ -1,7 +1,9 @@
 import { motion } from 'framer-motion';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Minus, Square, X } from 'lucide-react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import logoDark from '../assets/v1.svg';
+import logoLight from '../assets/v2.svg';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -19,18 +21,47 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-white select-none">
+    <div className="flex h-screen w-screen overflow-hidden bg-white select-none relative">
+      {/* Window Controls */}
+      <div className="absolute top-0 right-0 p-4 flex items-center gap-1.5 z-50">
+        <button
+          type="button"
+          onClick={() => getCurrentWindow().minimize()}
+          className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+          title="Minimize"
+        >
+          <Minus size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => getCurrentWindow().toggleMaximize()}
+          className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+          title="Maximize"
+        >
+          <Square size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={() => getCurrentWindow().close()}
+          className="p-1.5 rounded-lg hover:bg-red-600 text-zinc-400 hover:text-white transition-colors"
+          title="Close"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
       {/* Left Panel - 40% Width per spec */}
       <motion.div
-        className="w-[40%] h-full flex flex-col justify-between p-16 border-r border-gray-100"
+        data-tauri-drag-region
+        className="w-[40%] h-full flex flex-col justify-between p-16 border-r border-gray-100 cursor-move"
         initial={{ opacity: 0, x: -30 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       >
         {/* Top: Logo + Wordmark — NOT clickable, branding only */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 relative z-10 pointer-events-auto">
           <motion.img
-            src={logoDark}
+            src={logoLight}
             alt="Eldri Logo"
             className="w-8 h-8 pointer-events-none select-none"
             initial={{ scale: 0, rotate: -20 }}
@@ -111,7 +142,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
       {/* Right Panel - 60% Width per spec — non-white, premium animation */}
       <motion.div
-        className="w-[60%] h-full bg-black flex items-center justify-center relative overflow-hidden"
+        data-tauri-drag-region
+        className="w-[60%] h-full bg-black flex items-center justify-center relative overflow-hidden cursor-move"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8 }}
@@ -174,7 +206,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <img
               src={logoDark}
               alt="Eldri"
-              className="w-14 h-14 invert brightness-200 select-none pointer-events-none"
+              className="w-14 h-14 select-none pointer-events-none"
             />
           </motion.div>
         </div>

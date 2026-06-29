@@ -10,8 +10,12 @@ import {
   ChevronRight,
   Play,
   Crown,
+  Minus,
+  Square,
+  X,
 } from 'lucide-react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import Sessions from './components/Sessions';
 import Modes from './components/Modes';
@@ -142,7 +146,8 @@ export default function Dashboard({ onSignOut }: { onSignOut?: () => void }) {
     <div className={`flex h-screen w-screen font-sans overflow-hidden select-none antialiased ${tokens.shell} ${tokens.text}`}>
       {/* Sidebar */}
       <motion.aside
-        className={`${tokens.sidebar} border-r ${tokens.sidebarBorder} flex flex-col shrink-0 relative`}
+        data-tauri-drag-region
+        className={`${tokens.sidebar} border-r ${tokens.sidebarBorder} flex flex-col shrink-0 relative cursor-move`}
         animate={{ width: isCollapsed ? 72 : 240 }}
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
       >
@@ -163,7 +168,7 @@ export default function Dashboard({ onSignOut }: { onSignOut?: () => void }) {
             <AnimatePresence>
               {!isCollapsed && (
                 <motion.span
-                  className="font-bold text-lg tracking-tight text-black dark:text-white"
+                  className={`font-bold text-lg tracking-tight ${tokens.text}`}
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
@@ -252,7 +257,37 @@ export default function Dashboard({ onSignOut }: { onSignOut?: () => void }) {
       </motion.aside>
 
       {/* Main Content Area */}
-      <main className={`flex-1 flex flex-col min-h-0 p-5 ${tokens.main}`}>
+      <main className={`flex-1 flex flex-col min-h-0 px-5 pb-5 pt-2 relative ${tokens.main}`}>
+        {/* Custom titlebar drag region & window controls */}
+        <div data-tauri-drag-region className="w-full h-8 flex items-center justify-end mb-1 cursor-move select-none shrink-0">
+          <div className="flex items-center gap-1 relative z-50 pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => getCurrentWindow().minimize()}
+              className={`p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 ${tokens.textMuted} hover:${tokens.text} transition-colors`}
+              title="Minimize"
+            >
+              <Minus size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => getCurrentWindow().toggleMaximize()}
+              className={`p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 ${tokens.textMuted} hover:${tokens.text} transition-colors`}
+              title="Maximize"
+            >
+              <Square size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => getCurrentWindow().close()}
+              className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 transition-colors"
+              title="Close"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+
         <div className={`flex-1 flex flex-col rounded-2xl shadow-sm border overflow-hidden min-h-0 ${tokens.mainCard} ${tokens.cardBorder}`}>
           <div className="flex-1 overflow-y-auto p-8 min-h-0">
             <AnimatePresence mode="wait">

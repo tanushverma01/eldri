@@ -1,25 +1,94 @@
 pub mod capture;
 
 use keyring::Entry;
+use std::fs;
+use std::path::PathBuf;
+
+fn get_fallback_path() -> PathBuf {
+    let mut path = if let Ok(profile) = std::env::var("USERPROFILE") {
+        PathBuf::from(profile)
+    } else {
+        std::env::temp_dir()
+    };
+    path.push(".eldri_keys.json");
+    path
+}
+
+fn save_key_fallback(provider: &str, key: &str) -> Result<(), String> {
+    let path = get_fallback_path();
+    let mut keys: serde_json::Value = if path.exists() {
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    
+    keys[provider] = serde_json::json!(key);
+    
+    let content = serde_json::to_string_pretty(&keys)
+        .map_err(|e| format!("Failed to serialize fallback keys: {}", e))?;
+    fs::write(&path, content)
+        .map_err(|e| format!("Failed to write fallback keys file: {}", e))?;
+    Ok(())
+}
+
+fn get_key_fallback(provider: &str) -> Result<String, String> {
+    let path = get_fallback_path();
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read fallback keys file: {}", e))?;
+    let keys: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse fallback keys: {}", e))?;
+    
+    if let Some(val) = keys.get(provider) {
+        if let Some(s) = val.as_str() {
+            return Ok(s.to_string());
+        }
+    }
+    Ok(String::new())
+}
 
 pub async fn save_secure_key(provider: String, key: String) -> Result<(), String> {
     if key.trim().is_empty() {
         return Ok(());
     }
-    let vault_entry = Entry::new("eldri_godmode_vault", &provider)
-        .map_err(|e| format!("Vault init failed: {}", e))?;
-    vault_entry
-        .set_password(&key)
-        .map_err(|e| format!("Vault write failed: {}", e))?;
-    Ok(())
+    match Entry::new("eldri_godmode_vault", &provider) {
+        Ok(vault_entry) => {
+            if let Err(e) = vault_entry.set_password(&key) {
+                eprintln!("Keyring set_password failed: {}, falling back to file storage", e);
+                save_key_fallback(&provider, &key)
+            } else {
+                Ok(())
+            }
+        }
+        Err(e) => {
+            eprintln!("Keyring Entry::new failed: {}, falling back to file storage", e);
+            save_key_fallback(&provider, &key)
+        }
+    }
 }
 
 pub async fn get_secure_key(provider: String) -> Result<String, String> {
-    let vault_entry = Entry::new("eldri_godmode_vault", &provider)
-        .map_err(|e| format!("Vault init failed: {}", e))?;
-    match vault_entry.get_password() {
-        Ok(token) => Ok(token),
-        Err(_) => Ok(String::new()),
+    match Entry::new("eldri_godmode_vault", &provider) {
+        Ok(vault_entry) => {
+            match vault_entry.get_password() {
+                Ok(token) => {
+                    if token.is_empty() {
+                        get_key_fallback(&provider)
+                    } else {
+                        Ok(token)
+                    }
+                }
+                Err(_) => {
+                    get_key_fallback(&provider)
+                }
+            }
+        }
+        Err(_) => {
+            get_key_fallback(&provider)
+        }
     }
 }
 
@@ -81,30 +150,10 @@ pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    #[tauri::command]
-    async fn capture_screen(window: tauri::Window) -> Result<String, String> {
-        capture::capture_screen(window).await
-    }
-
-    #[tauri::command]
-    async fn save_secure_key_cmd(provider: String, key: String) -> Result<(), String> {
-        save_secure_key(provider, key).await
-    }
-
-    #[tauri::command]
-    async fn get_secure_key_cmd(provider: String) -> Result<String, String> {
-        get_secure_key(provider).await
-    }
-
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![
-            capture_screen,
-            save_secure_key_cmd,
-            get_secure_key_cmd
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
+// NOTE: The application entry point and full Tauri Builder (plugins, tray,
+// global shortcuts, deep-link, single-instance, command handlers) live in
+// `main.rs`. This library only exposes shared helpers used from there:
+//   - `capture` module (screen capture command impl)
+//   - `save_secure_key` / `get_secure_key` (OS keyring + fallbacks)
+//   - `setup_tray` (system tray wiring)
+// Do not add a second Builder/`run()` here — keep one source of truth in main.rs.
